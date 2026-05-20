@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>あまごいガエルの雨粒キャッチ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&display=swap');
+        
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0f172a; /* tailwind slate-900 */
+            font-family: 'M PLUS Rounded 1c', sans-serif;
+            overflow: hidden; /* 防止スクロール */
+            touch-action: none; /* スワイプ時のブラウザ挙動を無効化 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100%;
+            max-width: 450px; /* スマホライクなサイズ感 */
+            height: 100vh;
+            max-height: 800px;
+            background: linear-gradient(180deg, #1e293b 0%, #334155 100%);
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+
+        #game-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* カスタムアニメーション */
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+            100% { transform: translateY(0px); }
+        }
+        .animate-float {
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes pulse-bg {
+            0% { transform: scale(1); opacity: 0.8;}
+            50% { transform: scale(1.05); opacity: 1;}
+            100% { transform: scale(1); opacity: 0.8;}
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <!-- キャンバス -->
+        <canvas id="game-canvas"></canvas>
+
+        <!-- UIレイヤー: ゲーム中情報 -->
+        <div id="hud" class="absolute top-0 left-0 w-full p-4 flex justify-between items-start pointer-events-none opacity-0 transition-opacity duration-300">
+            <div class="bg-white/20 backdrop-blur-md rounded-2xl px-4 py-2 text-white font-bold shadow-lg border border-white/10">
+                <span class="text-sm text-blue-200">SCORE</span><br>
+                <span id="score-display" class="text-2xl">0</span>
+            </div>
+            <div class="flex gap-1" id="lives-display">
+                <!-- ライフアイコンがJSで挿入されます -->
+            </div>
+        </div>
+
+        <!-- UIレイヤー: スタート画面 -->
+        <div id="start-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-sm z-10 transition-opacity duration-500">
+            <div class="text-center animate-float mb-8">
+                <div class="text-6xl mb-4">🐸☔</div>
+                <h1 class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-300 to-teal-200 drop-shadow-md">
+                    あまごいガエルの<br>雨粒キャッチ
+                </h1>
+                <p class="text-blue-200 mt-4 text-sm px-6">
+                    指をスワイプ（またはマウス移動）してカエルを動かそう！<br>
+                    青い雨粒を集めて、雷雲を避けてね！
+                </p>
+            </div>
+            <button id="start-btn" class="px-8 py-4 bg-gradient-to-b from-teal-400 to-teal-600 hover:from-teal-300 hover:to-teal-500 text-white rounded-full font-bold text-xl shadow-[0_0_15px_rgba(45,212,191,0.6)] transition-transform active:scale-95 border-b-4 border-teal-800">
+                ゲームスタート
+            </button>
+        </div>
+
+        <!-- UIレイヤー: ゲームオーバー画面 -->
+        <div id="game-over-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90 backdrop-blur-md z-20 hidden opacity-0 transition-opacity duration-500">
+            <div class="text-6xl mb-4">😵🌧️</div>
+            <h2 class="text-4xl font-extrabold text-red-400 drop-shadow-md mb-2">GAME OVER</h2>
+            <div class="bg-white/10 rounded-2xl p-6 text-center w-3/4 max-w-xs mb-8 border border-white/20 shadow-xl">
+                <p class="text-blue-200 text-sm mb-1">最終スコア</p>
+                <p id="final-score" class="text-5xl font-bold text-white text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-yellow-500">0</p>
+            </div>
+            <button id="restart-btn" class="px-8 py-4 bg-gradient-to-b from-blue-500 to-blue-700 hover:from-blue-400 hover:to-blue-600 text-white rounded-full font-bold text-xl shadow-[0_0_15px_rgba(59,130,246,0.6)] transition-transform active:scale-95 border-b-4 border-blue-900">
+                もう一度遊ぶ
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('game-container');
+        
+        // UI Elements
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const startBtn = document.getElementById('start-btn');
+        const restartBtn = document.getElementById('restart-btn');
+        const hud = document.getElementById('hud');
+        const scoreDisplay = document.getElementById('score-display');
+        const livesDisplay = document.getElementById('lives-display');
+        const finalScoreDisplay = document.getElementById('final-score');
+
+        // Game State
+        let gameState = 'start'; // 'start', 'playing', 'gameover'
+        let score = 0;
+        let lives = 3;
+        let frameCount = 0;
+        let animationId;
+        let gameDifficulty = 1;
+
+        // Size adjustment
+        function resize() {
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        const player = {
+            x: canvas.width / 2,
+            y: canvas.height - 80,
+            width: 60,
+            height: 50,
+            targetX: canvas.width / 2,
+            speed: 0.2 // イーズ速度（滑らかに追従させるため）
+        };
+
+        let drops = [];
+        let particles = [];
+        let rainBackground = [];
+
+        // 背景の雨粒初期化
+        for(let i = 0; i < 100; i++) {
+            rainBackground.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                length: Math.random() * 20 + 10,
+                speed: Math.random() * 10 + 5,
+                opacity: Math.random() * 0.3 + 0.1
+            });
+        }
+
+        function updateLivesDisplay() {
+            livesDisplay.innerHTML = '';
+            for (let i = 0; i < 3; i++) {
+                const heart = document.createElement('div');
+                heart.className = `text-2xl transition-all duration-300 ${i < lives ? 'opacity-100 scale-100' : 'opacity-30 scale-75 grayscale'}`;
+                heart.innerText = '❤️';
+                livesDisplay.appendChild(heart);
+            }
+        }
+
+        function handleInput(e) {
+            if (gameState !== 'playing') return;
+            e.preventDefault(); // スクロール防止
+            
+            let clientX;
+            if (e.type.includes('touch')) {
+                clientX = e.touches[0].clientX;
+            } else {
+                clientX = e.clientX;
+            }
+
+            // コンテナ内の相対座標を計算
+            const rect = container.getBoundingClientRect();
+            const x = clientX - rect.left;
+            
+            // 範囲内に制限
+            player.targetX = Math.max(player.width/2, Math.min(canvas.width - player.width/2, x));
+        }
+
+        container.addEventListener('mousemove', handleInput);
+        container.addEventListener('touchmove', handleInput, {passive: false});
+        container.addEventListener('touchstart', handleInput, {passive: false});
+
+        function drawFrog() {
+            const x = player.x;
+            const y = player.y;
+            const w = player.width;
+            const h = player.height;
+
+            ctx.save();
+            // 体
+            ctx.fillStyle = '#4ade80'; // emerald green
+            ctx.beginPath();
+            ctx.ellipse(x, y, w/2, h/2, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // お腹
+            ctx.fillStyle = '#bbf7d0';
+            ctx.beginPath();
+            ctx.ellipse(x, y + h/6, w/3, h/3, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 目玉の土台
+            ctx.fillStyle = '#4ade80';
+            ctx.beginPath();
+            ctx.arc(x - w/3 + 5, y - h/3, w/4, 0, Math.PI * 2);
+            ctx.arc(x + w/3 - 5, y - h/3, w/4, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 白目
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.arc(x - w/3 + 5, y - h/3, w/5, 0, Math.PI * 2);
+            ctx.arc(x + w/3 - 5, y - h/3, w/5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 黒目 (動く)
+            ctx.fillStyle = '#1e293b';
+            let eyeOffsetX = (player.targetX - player.x) * 0.05; // 進行方向を見る
+            ctx.beginPath();
+            ctx.arc(x - w/3 + 5 + eyeOffsetX, y - h/3, w/10, 0, Math.PI * 2);
+            ctx.arc(x + w/3 - 5 + eyeOffsetX, y - h/3, w/10, 0, Math.PI * 2);
+            ctx.fill();
+
+            // ほっぺ
+            ctx.fillStyle = 'rgba(248, 113, 113, 0.6)';
+            ctx.beginPath();
+            ctx.arc(x - w/4, y, w/10, 0, Math.PI * 2);
+            ctx.arc(x + w/4, y, w/10, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 口
+            ctx.strokeStyle = '#064e3b';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            if (gameState === 'playing') {
+                ctx.arc(x, y, w/6, 0.2, Math.PI - 0.2); // にっこり
+            } else {
+                ctx.arc(x, y + h/4, w/6, Math.PI + 0.2, Math.PI * 2 - 0.2); // しょんぼり
+            }
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+
+        function drawDrop(drop) {
+            ctx.save();
+            ctx.translate(drop.x, drop.y);
+            
+            if (drop.type === 'rain' || drop.type === 'golden') {
+                // しずくの形
+                ctx.fillStyle = drop.type === 'golden' ? '#fbbf24' : '#60a5fa'; // amber-400 or blue-400
+                ctx.shadowColor = drop.type === 'golden' ? '#fcd34d' : '#93c5fd';
+                ctx.shadowBlur = 10;
+                
+                ctx.beginPath();
+                ctx.moveTo(0, -drop.radius * 1.5);
+                ctx.bezierCurveTo(drop.radius, -drop.radius * 0.5, drop.radius, drop.radius, 0, drop.radius);
+                ctx.bezierCurveTo(-drop.radius, drop.radius, -drop.radius, -drop.radius * 0.5, 0, -drop.radius * 1.5);
+                ctx.fill();
+            } else if (drop.type === 'danger') {
+                // 雷雲
+                ctx.fillStyle = '#64748b'; // slate-500
+                ctx.shadowColor = '#000';
+                ctx.shadowBlur = 5;
+                
+                // 雲
+                ctx.beginPath();
+                ctx.arc(0, 0, drop.radius, 0, Math.PI * 2);
+                ctx.arc(-drop.radius*0.8, drop.radius*0.2, drop.radius*0.8, 0, Math.PI * 2);
+                ctx.arc(drop.radius*0.8, drop.radius*0.2, drop.radius*0.8, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 雷
+                ctx.fillStyle = '#fef08a'; // yellow-200
+                ctx.beginPath();
+                ctx.moveTo(-5, drop.radius * 0.5);
+                ctx.lineTo(5, drop.radius * 0.5);
+                ctx.lineTo(0, drop.radius * 1.2);
+                ctx.lineTo(8, drop.radius * 1.0);
+                ctx.lineTo(-2, drop.radius * 2.0);
+                ctx.lineTo(2, drop.radius * 1.4);
+                ctx.lineTo(-6, drop.radius * 1.5);
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+
+        function spawnDrop() {
+            let type = 'rain';
+            let radius = 12;
+            const rand = Math.random();
+            
+            // 難易度に応じて危険物の出現率アップ
+            const dangerChance = Math.min(0.15 + (gameDifficulty * 0.02), 0.4);
+            const goldenChance = 0.05;
+
+            if (rand < dangerChance) {
+                type = 'danger';
+                radius = 16;
+            } else if (rand < dangerChance + goldenChance) {
+                type = 'golden';
+                radius = 14;
+            }
+
+            drops.push({
+                x: Math.random() * (canvas.width - radius * 2) + radius,
+                y: -30,
+                radius: radius,
+                type: type,
+                speed: (Math.random() * 3 + 3) * (1 + gameDifficulty * 0.1),
+                markedForDeletion: false
+            });
+        }
+
+        function createParticles(x, y, color) {
+            for(let i = 0; i < 8; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10,
+                    life: 1.0,
+                    color: color
+                });
+            }
+        }
+
+        function update() {
+            if (gameState !== 'playing') return;
+
+            // 時間経過で難易度上昇
+            frameCount++;
+            if (frameCount % 600 === 0) { // 約10秒ごと
+                gameDifficulty++;
+            }
+
+            // アイテム生成
+            const spawnRate = Math.max(15, 40 - gameDifficulty * 2); // 生成間隔を短くする
+            if (frameCount % Math.floor(spawnRate) === 0) {
+                spawnDrop();
+            }
+
+            // プレイヤー移動（イージングで滑らかに）
+            player.x += (player.targetX - player.x) * player.speed;
+
+            // 背景の雨更新
+            rainBackground.forEach(r => {
+                r.y += r.speed;
+                if(r.y > canvas.height) {
+                    r.y = -r.length;
+                    r.x = Math.random() * canvas.width;
+                }
+            });
+
+            // アイテムの更新と当たり判定
+            for (let i = drops.length - 1; i >= 0; i--) {
+                let drop = drops[i];
+                drop.y += drop.speed;
+
+                // 画面外
+                if (drop.y > canvas.height + 30) {
+                    drop.markedForDeletion = true;
+                }
+
+                // 当たり判定 (円の衝突)
+                const dx = drop.x - player.x;
+                // 見た目に合わせて当たり判定のY座標を少し調整（カエルの頭部付近）
+                const dy = drop.y - (player.y - player.height/4); 
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < drop.radius + player.width/2.5) {
+                    drop.markedForDeletion = true;
+                    
+                    if (drop.type === 'rain') {
+                        score += 10;
+                        createParticles(drop.x, drop.y, '#60a5fa');
+                    } else if (drop.type === 'golden') {
+                        score += 50;
+                        createParticles(drop.x, drop.y, '#fbbf24');
+                    } else if (drop.type === 'danger') {
+                        lives--;
+                        updateLivesDisplay();
+                        createParticles(drop.x, drop.y, '#fef08a');
+                        
+                        // 画面揺れエフェクト
+                        container.style.transform = 'translate(5px, 5px)';
+                        setTimeout(() => container.style.transform = 'translate(-5px, -5px)', 50);
+                        setTimeout(() => container.style.transform = 'translate(0, 0)', 100);
+
+                        if (lives <= 0) {
+                            endGame();
+                        }
+                    }
+                    scoreDisplay.innerText = score;
+                }
+            }
+
+            drops = drops.filter(drop => !drop.markedForDeletion);
+
+            // パーティクル更新
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.05;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+        }
+
+        function draw() {
+            // 背景クリア (わずかに透過して軌跡を残す)
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.6)'; 
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 背景の雨
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            rainBackground.forEach(r => {
+                ctx.moveTo(r.x, r.y);
+                ctx.lineTo(r.x, r.y + r.length);
+            });
+            ctx.stroke();
+
+            // アイテム描画
+            drops.forEach(drawDrop);
+
+            // パーティクル描画
+            particles.forEach(p => {
+                ctx.globalAlpha = Math.max(0, p.life);
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1.0;
+
+            // プレイヤー描画
+            drawFrog();
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            animationId = requestAnimationFrame(gameLoop);
+        }
+
+        function startGame() {
+            // 状態リセット
+            score = 0;
+            lives = 3;
+            frameCount = 0;
+            gameDifficulty = 1;
+            drops = [];
+            particles = [];
+            player.x = canvas.width / 2;
+            player.targetX = canvas.width / 2;
+            gameState = 'playing';
+
+            // UI更新
+            scoreDisplay.innerText = score;
+            updateLivesDisplay();
+            
+            // 画面切り替え
+            startScreen.classList.add('opacity-0');
+            gameOverScreen.classList.add('opacity-0');
+            setTimeout(() => {
+                startScreen.classList.add('hidden');
+                gameOverScreen.classList.add('hidden');
+                hud.classList.remove('opacity-0');
+            }, 500);
+
+            // 古いループがあれば停止
+            if (animationId) cancelAnimationFrame(animationId);
+            gameLoop();
+        }
+
+        function endGame() {
+            gameState = 'gameover';
+            finalScoreDisplay.innerText = score;
+            
+            // UI表示
+            hud.classList.add('opacity-0');
+            gameOverScreen.classList.remove('hidden');
+            // 少し遅らせてフェードイン
+            setTimeout(() => {
+                gameOverScreen.classList.remove('opacity-0');
+            }, 50);
+        }
+
+        // 初期描画だけしておく（背景用）
+        draw();
+
+        // イベントリスナー
+        startBtn.addEventListener('click', startGame);
+        restartBtn.addEventListener('click', startGame);
+
+    </script>
+</body>
+</html>
